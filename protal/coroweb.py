@@ -13,7 +13,7 @@ from urllib import parse
 
 from aiohttp import web
 
-from error import APIError
+from exceptions import APIError
 
 def get(path):
     '''
