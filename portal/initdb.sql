@@ -4,7 +4,7 @@ create database cmccb2b;
 
 use cmccb2b;
 
-grant select, insert, update, delete on cmccb2b.* to 'www'@'%' identified by 'www-data';
+-- grant select, insert, update, delete on cmccb2b.* to 'www'@'%' identified by 'www-data';
 
 CREATE TABLE  BidNotices (
     `spider` varchar(20) not null,
