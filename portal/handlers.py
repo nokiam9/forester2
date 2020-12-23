@@ -95,18 +95,30 @@ async def notice_page_view(type_id, *, page_id=1):
     #     'page': page,
     #     'blogs': blogs
     # }
-    num = await BidNotices.findNumber('count(nid)')
-    notices = await BidNotices.findAll()
-    p = Page(num, 1, 2)
+    # num = BidNotices.objects.count()
+    from sqlalchemy.orm import sessionmaker
+    from models import __pool
+    DBSession = sessionmaker(bind=__pool)
+
+    session = DBSession()
+
+    records = session.query(BidNotices).count()
+    notices = session.query(BidNotices).order_by(
+            BidNotices.published_date.desc(), BidNotices.timestamp.desc())
+        # ).paginate(page=page_id, per_page=PAGE_SIZE)
+    # p = Page(num, 1, 2)
+    todos_page = {
+        'total': records,
+        'iter_pages': [1, 2, 3],
+        'page': 1,
+        'items': notices
+    }
+
+    session.close()
 
     return {
         '__template__': 'pagination.html',
-        'todos_page': {
-            'total': len(notices),
-            'iter_pages': [1, 2, 3],
-            'page': 1,
-            'items': notices
-        },
+        'todos_page': todos_page,
         'type_id': type_id,
         'title': title
     }

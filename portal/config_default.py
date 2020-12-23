@@ -9,13 +9,7 @@ Default configurations.
 
 configs = {
     'debug': True,
-    'db': {
-        'host': '127.0.0.1',
-        'port': 3306,
-        'user': 'root',
-        'password': '123456',
-        'db': 'cmccb2b'
-    },
+    'uri': 'mysql+pymysql://root:123456@localhost:3306/cmccb2b'
     # 'session': {
     #     'secret': 'cmccb2b'
     # }

@@ -15,7 +15,7 @@ from aiohttp import web
 from jinja2 import Environment, FileSystemLoader
 
 from config import configs
-# import orm
+from models import create_pool, BidNotices
 from coroweb import add_routes, add_static
 
 def init_jinja2(app, **kw):
@@ -120,7 +120,7 @@ def datetime_filter(t):
 async def init(loop):
     """初始化web.server
     """
-    await orm.create_pool(loop=loop, **configs['db'])
+    create_pool(configs['uri'])
     # 创建web服务器实例，并加载几个中间件
     app = web.Application(loop=loop, middlewares=[
         logger_factory, response_factory
