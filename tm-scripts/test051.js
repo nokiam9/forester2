@@ -39,22 +39,6 @@
         */
     }
 
-    function nextStep(id, page_info) {
-        let now = getStatus(id);
-        if (now.end > 0) { // 尾部还没读完
-            const new_end = page_info.total - ((page_info.current_page - 1) * page_info.page_size) - page_info.records_in_page;
-            setStatus(id, now.total, now.start, new_end); // 刷新status并持久化
-        } else if (now.start < now.total) { // 头部还没读完
-            const new_start = page_info.total - ((page_info.current_page - 1) * page_info.page_size);
-            setStatus(id, now.total, new_start, now.end); // 刷新status并持久化
-        }
-
-        now = getStatus(id);
-        if (now.end > 0) return 'forward';
-        else if (now.start < now.total) return 'backward';
-        else return 'stop';
-    }
-
     // Main入口
     (async function(){
         console.log('Debug: start main ...');
@@ -70,11 +54,9 @@
             status = getStatus(type_id);
         } else if (status.total < page_info.total) { // 断点以来有新的记录
             console.log('Info(main): 发现自断点以来的新记录，刷新GM状态数据...');
-            updateTotal(type_id, page_info.total);
-            status = getStatus(type_id);
+            status = updateStatusTotal(type_id, page_info.total);
         }
 
-        // let direction = isContinue(status);
         if (BREAKPOINT_MODE) {
             console.log('Info(main): 本次程序运行在断点模式...');
             let page_no = 0;
@@ -88,53 +70,48 @@
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
             }
-            if (page_no != page_info.current_page) {
+            if (page_no != page_info.current_page) { // 如果只新增几条记录，可能还在第一页
                 console.log('Info(main): 准备跳转到断点页面，页码=', page_no, ', type=', typeof(page_no));
                 await gotoPage(page_no);
                 page_info = preReadPage(window.document);
-                status = updateTotal(type_id, page_info.total);
-                //direction = isContinue(status);
+                status = updateStatusTotal(type_id, page_info.total);
             }
         } else {
             console.log('Info(main): 本次程序运行在全新模式，默认从第1页开始...');
         }
 
         do {
-            console.log(reprStatus(type_id));
             console.log('Info(main): page_now=', page_info.current_page, '，爬取&发送数据');
             readPage(document);
-            const direction = nextStep(type_id, page_info);
-            switch (direction) {
-                case 'stop':
-                    console.log('Info(main): 没有新数据，本次运行即将结束');
-                    return 0;
-                case 'forward':
-                    if (page_info.next_page_button == null) console.log('Error(main): 主循环控制错误，找不到next按钮');
-                    else {
-                        console.log('Info(main): Pause 5 seconds, then start to scrapy next page');
-                        page_info.next_page_button.onclick(); // 模拟click ‘下一页’按钮
-                    }
-                    break;
-                case 'backword':
-                    if (page_info.previous_page_btn == null) console.log('Error(main): 主循环控制错误，找不到previous按钮');
-                    else {
-                        console.log('Info(main): Pause 5 seconds, then start to scrapy previous page');
-                        page_info.previous_page_button.onclick(); // 模拟click ‘上一页’按钮
-                    }
-                    break;
+            status = updateStatusStep(type_id, page_info);
+            if (status.end > 0) {
+                if (page_info.next_page_button == null) console.log('Error(main): 主循环控制错误，找不到next按钮');
+                else {
+                    console.log('Info(main): Pause 5 seconds, then start to scrapy next page');
+                    page_info.next_page_button.onclick(); // 模拟click ‘下一页’按钮
+                }
+            } else if (status.total > status.start) {
+                if (page_info.previous_page_btn == null) console.log('Error(main): 主循环控制错误，找不到previous按钮');
+                else {
+                    console.log('Info(main): Pause 5 seconds, then start to scrapy previous page');
+                    page_info.previous_page_button.onclick(); // 模拟click ‘上一页’按钮
+                }
+            } else {
+                console.log('Info(main): 没有新数据，本次运行即将结束');
+                return 0;
             }
+
             await sleep(5000);
             await waitForSelector(window, settings.selector.current_page); // 等待click后的页面更新
             page_info = preReadPage(window.document);
-            status = updateTotal(type_id, page_info.total);
-            //direction = isContinue(status);
+            status = updateStatusTotal(type_id, page_info.total);
         } while(1);
     }
     )();
 
     async function gotoPage(pageNumber){
         if (typeof(pageNumber) != 'number' || pageNumber <= 0 ) {
-            alert('Error(gotoPage): 输入参数错误， pageNumber=' + toString(pageNumber));
+            console.log('Error(gotoPage): 输入参数错误， pageNumber=' + String(pageNumber));
             return -1;
         }
         document.querySelector(settings.selector.page_number_input).value = pageNumber; // 模拟输入‘页码’
@@ -145,7 +122,7 @@
         let x = document.querySelector(settings.selector.current_page).value;
         if (Number(x) == pageNumber) console.log('Info(gotoPage): 成功调转到断点页码， 当前页码=', x );
         else {
-            alert('Error(gotoPage): 无法调转到断点页码， pageNumber=' + toString(pageNumber));
+            console.log('Error(gotoPage): 无法调转到断点页码， pageNumber=' + String(pageNumber));
             return -2;
         }
     }
@@ -182,24 +159,37 @@
         return GM_getValue(id);
     }
 
-    function updateTotal(id, new_total) {
+    function reprStatus(id) {
+        const s = getStatus(id);
+        if (s == null) {
+            console.log('Error(reprStatus: invaild status! id=', String(id));
+            return null;
+        }
+        return 'type_id=' + id + ': total=' + String(s.total) + ', start=' + String(s.start) + ', end=' + String(s.end);
+    }
+
+    function updateStatusTotal(id, new_total) {
         const now = getStatus(id);
         if (new_total < now.total) {
             console.log('Error(updateStatus): update status of new total error! new_total=', new_total, ', status=', reprStatus(id));
             return null;
         } else if (new_total > now.total) {
             console.log('Info(updateStatus): find some new records! total=', now.total, ', new total=', new_total);
-            GM_setValue(id, {total:new_total, start: now.start, end:now.end});
-            console.log('Debug(updateStatus): status=', reprStatus(id));
+            setStatus(id, {total:new_total, start: now.start, end:now.end});
         }
-        console.log('Debug(updateStatus): ', reprStatus(id));
         return getStatus(id);
     }
 
-    function reprStatus(id) {
-        const s = getStatus(id);
-        if (s == null) return 'err';
-        return 'type_id=' + id + ', total=' + String(s.total) + ', start=' + String(s.start) + ', end=' + String(s.end);
+    function updateStatusStep(id, page_info) {
+        let now = getStatus(id);
+        if (now.end > 0) { // 尾部还没读完
+            const new_end = page_info.total - ((page_info.current_page - 1) * page_info.page_size) - page_info.records_in_page;
+            setStatus(id, now.total, now.start, new_end); // 刷新status并持久化
+        } else if (now.start < now.total) { // 头部还没读完
+            const new_start = page_info.total - ((page_info.current_page - 1) * page_info.page_size);
+            setStatus(id, now.total, new_start, now.end); // 刷新status并持久化
+        }
+        return getStatus(id);
     }
 
     function waitForSelector(page, id){
