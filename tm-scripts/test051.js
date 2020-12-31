@@ -7,8 +7,6 @@
 // @match        https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=*
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_deleteValue
-// @grant        GM_listValues
 // ==/UserScript==
 
 (function() {
@@ -128,6 +126,7 @@
     }
 
     function preReadPage(doc) { // TODO: try & catch
+        // > document.querySelector('[name="page.totalRecordNum"').value   ==>  "292,597"
         const str = doc.querySelector(settings.selector.total_records).innerText.trim(); // 典型格式为：‘共292,298条数据/14,615页’
         return {
             total: Number(str.split('/')[0].slice(1,-3).replace(',','')),
