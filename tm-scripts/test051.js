@@ -42,7 +42,7 @@
     // Main入口
     (async function(){
         console.log('Debug: start main ...');
-        await waitForSelector(window, settings.selector.current_page); // 提取当前活跃焦点的Page序号
+        await waitForSelector(document, settings.selector.current_page); // 提取当前活跃焦点的Page序号
 
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
         let page_info = preReadPage(window.document);
@@ -72,7 +72,7 @@
             }
             if (page_no != page_info.current_page) { // 如果只新增几条记录，可能还在第一页
                 console.log('Info(main): 准备跳转到断点页面，页码=', page_no, ', type=', typeof(page_no));
-                await gotoPage(page_no);
+                await gotoPage(document, page_no);
                 page_info = preReadPage(window.document);
                 status = updateStatusTotal(type_id, page_info.total);
             }
@@ -81,7 +81,7 @@
         }
 
         do {
-            console.log('Info(main): page_now=', page_info.current_page, '，爬取&发送数据');
+            console.log('Info(main): page_now=', page_info.current_page, ', records_in_page=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
             readPage(document);
             status = updateStatusStep(type_id, page_info);
             if (status.end > 0) {
@@ -102,14 +102,14 @@
             }
 
             await sleep(5000);
-            await waitForSelector(window, settings.selector.current_page); // 等待click后的页面更新
+            await waitForSelector(document, settings.selector.current_page); // 等待click后的页面更新
             page_info = preReadPage(window.document);
             status = updateStatusTotal(type_id, page_info.total);
         } while(1);
     }
     )();
 
-    async function gotoPage(pageNumber){
+    async function gotoPage(doc, pageNumber){
         if (typeof(pageNumber) != 'number' || pageNumber <= 0 ) {
             console.log('Error(gotoPage): 输入参数错误， pageNumber=' + String(pageNumber));
             return -1;
@@ -117,7 +117,7 @@
         document.querySelector(settings.selector.page_number_input).value = pageNumber; // 模拟输入‘页码’
         document.querySelector(settings.selector.goto_page_button).onclick(); //模拟点击‘GO’按钮
         await sleep(5000); // 等待页面刷新
-        await waitForSelector(window, settings.selector.current_page);
+        await waitForSelector(doc, settings.selector.current_page);
 
         let x = document.querySelector(settings.selector.current_page).value;
         if (Number(x) == pageNumber) console.log('Info(gotoPage): 成功调转到断点页码， 当前页码=', x );
@@ -192,17 +192,17 @@
         return getStatus(id);
     }
 
-    function waitForSelector(page, id){
+    function waitForSelector(doc, id){
         return new Promise((resolve, reject)=> {
             const retry_delay = 500;
-            const retry_limits = 5;
+            const retry_limits = 10;
             let retry_cnt = 0;
 
             if (id == null) reject('Error(waitForSelector): argument id is null!');
             setInterval(function myVar(){
-                if (page.document.querySelector(id)) {
+                if (doc.querySelector(id)) {
                     clearInterval(myVar);
-                    resolve(page.document);
+                    resolve(doc);
                 } else if (retry_cnt >= retry_limits) {
                     clearInterval(myVar);
                     reject('Error(waitForSelector->myTimer): Failed searching for node=', id);
