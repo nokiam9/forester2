@@ -127,7 +127,7 @@
         }
     }
 
-    function preReadPage(doc) {
+    function preReadPage(doc) { // TODO: try & catch
         const str = doc.querySelector(settings.selector.total_records).innerText.trim(); // 典型格式为：‘共292,298条数据/14,615页’
         return {
             total: Number(str.split('/')[0].slice(1,-3).replace(',','')),
@@ -162,7 +162,7 @@
     function reprStatus(id) {
         const s = getStatus(id);
         if (s == null) {
-            console.log('Error(reprStatus: invaild status! id=', String(id));
+            console.log('Error(reprStatus): invaild status! id=', String(id));
             return null;
         }
         return 'type_id=' + id + ': total=' + String(s.total) + ', start=' + String(s.start) + ', end=' + String(s.end);
