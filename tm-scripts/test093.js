@@ -48,7 +48,7 @@
         console.log('Info(main): start main ...');
         showAllStatus();
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
-        if (settings.type_id_groups.indexOf(type_id) == null) {
+        if (settings.type_id_groups.indexOf(type_id) < 0) {
             console.log('Error(main): 无法正常启动，因为发现未知的type_id, 。type_id=', type_id);
             return -1;
         }
@@ -287,7 +287,7 @@
         }
         else {
             let direction = 'stop';
-            if (total > start) direction = 'backwrad';
+            if (total > start) direction = 'backward';
             else if (end > 0) direction = 'forward';
             GM_setValue(id, {total:total, start:start, end:end, direction:direction, timestamp: new Date().getTime()});
             console.log('Debug(setStatus): ', reprStatus(id));
