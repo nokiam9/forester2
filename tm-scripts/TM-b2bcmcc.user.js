@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TM-b2bcmcc
 // @namespace    www.caogo.cn
-// @version      0.94
+// @version      0.95a
 // @description  scrapy notice info from DOM
 // @author       sj0225@icloud.com
 // @match        https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=*
@@ -42,9 +42,17 @@
         //post_base_url: 'http://127.0.0.1/api/notices/',
     };
 
+    function nextPage(status, page_size) {
+        if (status.direction == 'backward') { // 向前读取
+            return Math.floor((status.total - status.start) / page_size) + 1; // backward
+        } else if (status.direction == 'forward') { // 向后读取，
+            return Math.floor((status.total - status.end) / page_size) + 1;
+        } else return 0; // 头尾都是空，全部结束退出
+    }
+
     // Main入口
     (async function(){
-        //debugger;
+        debugger;
         console.log('Info(main): start main ...');
         showAllStatus();
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
@@ -76,16 +84,15 @@
             } else if (status.total < list_info.total) { // 页面有更新
                 status = updateStatusTotal(type_id, list_info.total);
             }
-            if (status.direction == 'stop') {
+            const next_page = nextPage(status, list_info.page_size);
+            if (next_page == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
-            }
-            let page_no = 0;
-            if (status.direction == 'forward') page_no = Math.floor((list_info.total - status.end) / list_info.page_size) + 1;
-            else page_no = Math.floor((list_info.total - status.start) / list_info.page_size) + 1; // backward
-            if (page_no != list_info.current_page) { // 如果只新增几条记录，可能还在第一页
-                console.log('Info(main): 准备跳转到断点页面，页码=', page_no, ', type=', typeof(page_no));
-                await gotoPage(document, page_no);
+            } else if (next_page != list_info.current_page) { // 如果只新增几条记录，可能还在第一页或者当前页面
+                console.log('Info(main): 准备跳转到断点页面，页码=', next_page);
+                await gotoPage(document, next_page);
+                await sleep(3000);
+                await waitForSelector(window, settings.selector.current_page); // 等待click后的页面更新
                 list_info = getNoticeListInfo(window.document);
                 status = updateStatusTotal(type_id, list_info.total);
             }
@@ -104,29 +111,25 @@
                     }
                 }
             );
-
             status = updateStatusStep(type_id, list_info); // 完成记录读取以后，需要重置滑动窗口信息
-            if (status.direction == 'stop') {
+
+            // 根据更新后的status，并准备跳转下一个页面
+            const next_page = nextPage(status, list_info.page_size);
+            if (next_page == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
+            } else if (next_page != list_info.current_page) { // 这是正常流程
+                console.log('Info(main): 准备跳转到断点页面，页码=', next_page);
+                await gotoPage(document, next_page);
+                await sleep(3000);
+                await waitForSelector(window, settings.selector.current_page); // 等待click后的页面更新
+                list_info = getNoticeListInfo(window.document);
+                status = updateStatusTotal(type_id, list_info.total);
+                times--;
+            } else {
+                console.log('Error(main): 可能出现主循环控制错误，在当前页面循环！！！');
+                return -99;
             }
-            if (status.direction == 'forward') {
-                if (list_info.next_page_button) {
-                    console.log('Info(main): Pause 3 seconds, then start to scrapy next page');
-                    list_info.next_page_button.onclick(); // 模拟click ‘下一页’按钮
-                } else console.log('Error(main): 主循环控制错误，找不到next按钮');
-            } else { // backward
-                if (list_info.previous_page_btn) {
-                    console.log('Info(main): Pause 3 seconds, then start to scrapy previous page');
-                    list_info.previous_page_button.onclick(); // 模拟click ‘上一页’按钮
-                } else console.log('Error(main): 主循环控制错误，找不到previous按钮');
-            }
-
-            await sleep(3000);
-            await waitForSelector(window, settings.selector.current_page); // 等待click后的页面更新
-            list_info = getNoticeListInfo(window.document);
-            status = updateStatusTotal(type_id, list_info.total);
-            times--;
         } while(times > 0);
         console.log('Info(main): 已经达到累计读取页面数量限制，本次运行即将结束！');
         return 1;
@@ -286,9 +289,9 @@
             return null;
         }
         else {
-            let direction = 'stop';
-            if (total > start) direction = 'backward';
-            else if (end > 0) direction = 'forward';
+            let direction = 'stop'; // Stop
+            if (total > start) direction = 'backward'; // Backward，优先读取头部，但可能造成direction翻转
+            else if (end > 0) direction = 'forward'; // Forward
             GM_setValue(id, {total:total, start:start, end:end, direction:direction, timestamp: new Date().getTime()});
             console.log('Debug(setStatus): ', reprStatus(id));
             return getStatus(id);
@@ -308,7 +311,7 @@
             return null;
         }
         return 'type_id=' + id + ': total=' + s.total.toString() + ', start=' + s.start.toString()
-            +', end=' + s.end.toString() + ', direction=' + s.direction +', timestamp=' + new Date(s.timestamp).toString();
+            +', end=' + s.end.toString() + ', direction=' + s.direction + ', timestamp=' + new Date(s.timestamp).toString();
     }
 
     // Func：当发现记录总数有新增时，更新滑动窗口的记录总数信息
@@ -318,7 +321,7 @@
             console.log('Error(updateStatus): update status of new total error! new_total=', new_total, ', status=', reprStatus(id));
             return null;
         } else if (new_total > now.total) {
-            console.log('Info(updateStatus): find some new records! total=', now.total, ', new total=', new_total);
+            console.log('Info(updateStatus): 发现 ', new_total - now.total, '条新记录! total=', now.total, ', new total=', new_total);
             setStatus(id, new_total, now.start, now.end);
         }
         return getStatus(id);
