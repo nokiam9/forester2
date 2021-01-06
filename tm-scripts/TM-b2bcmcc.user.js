@@ -19,7 +19,7 @@
 
     // 全局配置信息
     const settings = {
-        //RESET_MODE: true, // 默认是断点恢复模式
+        RESET_MODE: true, // 默认是断点恢复模式
         NUMBER_OF_PAGES_READ_PER_STARTUP: 25, // 每次运行读取的页面数量
         SECONDS_BEFORE_LAST_RUNTIME: 60*0, // 上次运行的间隔时间，以防止插件重复运行
         spider: 'TM',
@@ -64,7 +64,7 @@
         }
         if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) {
             console.log('Error(main): 无法正常启动，可能上次启动尚未结束，请等待2分钟。lasttime=', new Date(lastRuntime()).toString());
-            return -2;
+            throw('run too rapid, please wait a moment and try again!');
         }
 
         const reset_mode = settings.RESET_MODE ? settings.RESET_MODE : false;
@@ -101,19 +101,25 @@
         do {
             console.log('Info(main): ', reprStatus(type_id));
             console.log('Info(main): page_now=', list_info.current_page, ', records_in_page=', list_info.records_in_page, '。 爬取 && 发送数据。。。');
-            await getNoticeList(document, settings.spider, type_id).then( // 获取包含content的公告列表数组
+            await getNoticeList(document, settings.spider, type_id)
+                .then( // 获取包含content的公告列表数组
                 notices => {
                     for (let x of notices) {
                         postOneNotice(x, settings.post_base_url).then( // 通过XHR发送爬取结果数据
-                            status => console.log('Info(main): post notice, nid=', x.nid, ', status=',status),
-                            error => console.log('Error(main): post notice failed! msg=', error)
+                            //status => console.log('Info(main): post notice, nid=', x.nid, ', status=',status),
+                            //error => console.log('Error(main): post notice failed! msg=', error)
                         );
                     }
-                }
-            );
+                })
+                .catch(
+                error => {
+                    console.log('Error(main): read content error, abort for retry again!');
+                    throw 'DOM error'; // TODO : 方法有效，需要catch处理
+                })
 
             status = updateStatusStep(type_id, list_info); // 完成记录读取以后，需要重置滑动窗口信息
             const page_no = jumpPage(status, list_info);
+            console.log('Debug(main): 即将跳转到新页面，page_no=', page_no)
             if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
@@ -121,7 +127,8 @@
                 console.log('Error(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
             }
             gotoPage(document, page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
-            // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走            
+            await sleep(5000);
+            // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
             list_info = getNoticeListInfo(window.document);
             status = updateStatusTotal(type_id, list_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
             times--;
@@ -182,8 +189,12 @@
                         content => {
                             Object.assign(x, {notice_url: url});
                             Object.assign(x, {notice_content : content}); // 追加公告内容，后续增加附件下载功能
-                            console.log('Info(getNoticeList): nid=', x.nid, ', title=', x.title.substr(0,40), ',length=', x.notice_content.length);
-                        } // TODO: error handle?
+                            console.log('Info(getNoticeList): nid=', x.nid, ', title=', x.title.substr(0,30), ',length=', x.notice_content.length);
+                        }, // TODO: error handle?
+                        error => {
+                            console.log('Error(getNoticeList): nid=', x.nid, ', title=', x.title.substr(0,30), 'msg=', error);
+                            reject('retry');
+                        }
                     );
                 };
                 ctw.close();
@@ -201,7 +212,11 @@
                 page.location.assign(url); // 打开内容网页
                 //console.log('Info(getContent): Open window with url=', url);
                 await waitForSelector(page, selector_id).then( //异步等待指定内容出现
-                    doc => resolve(doc.body.innerText.trim()),
+                    doc => {
+                        const str = doc.body.innerText.trim();
+                        if (str.length <= 103) reject('DOM of notice content incomplete');
+                        resolve(str);
+                    },
                     //doc => resolve(doc.body.outerHTML), // TODO: html or text
                     error => reject(error)
                 );
@@ -306,7 +321,7 @@
             return null;
         }
         return 'type_id=' + id + ': total=' + s.total.toString() + ', start=' + s.start.toString()
-            +', end=' + s.end.toString() + ', direction=' + s.direction +', timestamp=' + new Date(s.timestamp).toString();
+            +', end=' + s.end.toString() + ', direction=' + s.direction +', timestamp=' + new Date(s.timestamp).toISOString();
     }
 
     // Func：当发现记录总数有新增时，更新滑动窗口的记录总数信息
