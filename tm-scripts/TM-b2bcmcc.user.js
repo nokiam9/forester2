@@ -129,7 +129,7 @@
                 } else console.log('Error(main): 主循环控制错误，jumpPage可能陷入当前页面的死循环');
             }
             list_info = getNoticeListInfo(window.document);
-            status = updateStatusTotal(type_id, list_info.total);
+            status = updateStatusTotal(type_id, list_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
             times--;
         } while(times > 0);
         console.log('Info(main): 已经达到累计读取页面数量限制，本次运行即将结束！');
