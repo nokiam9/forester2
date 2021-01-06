@@ -44,8 +44,12 @@
 
     function jumpPage(status, list_info){
         if (status.direction == 'stop') return 0;
-        else if (status.direction == 'forward') return Math.floor((list_info.total - status.end) / list_info.page_size) + 1;
-        else return Math.floor((list_info.total - status.start) / list_info.page_size); // backward
+        else if (status.direction == 'forward') {
+            return Math.floor((list_info.total - status.end) / list_info.page_size) + 1;
+        }
+        else {
+            return Math.floor((list_info.total - status.start - 1) / list_info.page_size) + 1; // backward
+        }
     }
 
     // Main入口
@@ -88,7 +92,7 @@
                 return 0;
             } else if (page_no != list_info.current_page) { // 如果只新增几条记录，可能还在第一页
                 console.log('Info(main): 准备跳转到断点页面，页码=', page_no, ', type=', typeof(page_no));
-                await gotoPage(document, page_no);
+                await gotoPage(document, page_no); // TODO: ????
                 list_info = getNoticeListInfo(window.document);
                 status = updateStatusTotal(type_id, list_info.total);
             }
@@ -109,25 +113,15 @@
             );
 
             status = updateStatusStep(type_id, list_info); // 完成记录读取以后，需要重置滑动窗口信息
-            if (status.direction == 'stop') {
+            const page_no = jumpPage(status, list_info);
+            if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
-            } else if (status.direction == 'forward') { // 此时没有发现新纪录，继续下一页
-                if (list_info.next_page_button) {
-                    console.log('Info(main): Pause 3 seconds, then start to scrapy next page');
-                    list_info.next_page_button.onclick(); // 模拟click ‘下一页’按钮
-                    await sleep(3000);
-                    await waitForSelector(window, settings.selector.current_page); // 等待click后的页面更新
-                } else console.log('Error(main): 主循环控制错误，找不到next按钮');
-            } else { // backward，可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
-                const page_no = jumpPage(status, list_info);
-                if (page_no == 0) {
-                    console.log('Info(main): 没有新数据，本次运行即将结束');
-                    return 0;}
-                else if (page_no != list_info.current_page) {
-                    gotoPage(document, page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
-                } else console.log('Error(main): 主循环控制错误，jumpPage可能陷入当前页面的死循环');
+            } else if (page_no == list_info.current_page) {
+                console.log('Error(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
             }
+            gotoPage(document, page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
+            // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走            
             list_info = getNoticeListInfo(window.document);
             status = updateStatusTotal(type_id, list_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
             times--;
