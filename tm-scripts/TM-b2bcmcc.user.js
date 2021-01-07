@@ -19,7 +19,7 @@
 
     // 全局配置信息
     const settings = {
-        RESET_MODE: true, // 默认是断点恢复模式
+        //RESET_MODE: true, // 默认是断点恢复模式
         NUMBER_OF_PAGES_READ_PER_STARTUP: 25, // 每次运行读取的页面数量
         SECONDS_BEFORE_LAST_RUNTIME: 60*0, // 上次运行的间隔时间，以防止插件重复运行
         spider: 'TM',
@@ -54,7 +54,7 @@
 
     // Main入口
     (async function(){
-        debugger;
+        //debugger;
         console.log('Info(main): start main at ', new Date().toString);
         showAllStatus();
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
@@ -101,7 +101,7 @@
                 const notices = await getNoticeList(document, settings.spider, type_id);
                 for (let x of notices) postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
             } catch(error) {
-                throw(error); // 经常出现DOM不完整的错误不好处理，直接退出下次再试
+                throw('Alex catched:' + error); // 经常出现DOM不完整的错误不好处理，直接退出下次再试
             }
 
             // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
@@ -135,7 +135,10 @@
                 data:       JSON.stringify(notice),
                 onload:     function (response){
                     if (response.status == 200) resolve('ok'); // 插入成功
-                    else if (response.status == 405) resolve('duplicated'); // 重复记录，约定http返回码=405
+                    else if (response.status == 405) {
+                        console.log('Warn(postOneNotice): XHR发现重复记录， nid=' + notice.nid);
+                        resolve('duplicated'); // 重复记录，约定http返回码=405
+                    }
                     else reject(response); // 未知应用错误
                 },
                 onerror: function(error){ // 网络错误
@@ -203,7 +206,7 @@
                         } else resolve(str);
                     }
                     reject('DOM of content incompelete, url=' + url);
-                } catch(error) { reject(error); }
+                } catch(error) { reject(url + ':' + error); }
             })(); // 定义异步函数并立即执行
         });
     }
