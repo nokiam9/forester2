@@ -54,18 +54,12 @@
 
     // Main入口
     (async function(){
-        //debugger;
-        console.log('Info(main): start main at ', new Date());
+        debugger;
+        console.log('Info(main): start main at ', new Date().toString);
         showAllStatus();
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
-        if (settings.type_id_groups.indexOf(type_id) < 0) {
-            console.log('Error(main): 无法正常启动，因为发现未知的type_id, 。type_id=', type_id);
-            return -1;
-        }
-        if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) {
-            console.log('Error(main): 无法正常启动，可能上次启动尚未结束，请等待2分钟。lasttime=', new Date(lastRuntime()).toString());
-            throw('run too rapid, please wait a moment and try again!');
-        }
+        if (settings.type_id_groups.indexOf(type_id) < 0) throw('未知的type_id');
+        if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) throw('启动等待间隔时间未到');
 
         const reset_mode = settings.RESET_MODE ? settings.RESET_MODE : false;
         let times = settings.NUMBER_OF_PAGES_READ_PER_STARTUP ? settings.NUMBER_OF_PAGES_READ_PER_STARTUP : 500;
@@ -75,11 +69,11 @@
         let status = getStatus(type_id);
 
         if (reset_mode) { // 全新模式
-            console.log('Info(main): 本次程序运行在全新模式，清理所有状态，并默认从第1页开始, 读取页面数量=', times);
+            console.log('Info(main): 本次程序运行在全新模式，清理所有状态，并默认从第1页开始, 读取页面次数=', times);
             clearAllStatus();
             status = setStatus(type_id, list_info.total, list_info.total, list_info.total);
         } else { // 断点模式
-            console.log('Info(main): 本次程序运行在断点模式，读取页面数量=', times);
+            console.log('Info(main): 本次程序运行在断点模式，读取页面次数=', times);
             if (status == null) {
                 console.log('Info:(main) 断点日志不存在，自动创建之...');
                 status = setStatus(type_id, list_info.total, list_info.total, list_info.total);
@@ -91,45 +85,39 @@
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
             } else if (page_no != list_info.current_page) { // 如果只新增几条记录，可能还在第一页
-                console.log('Info(main): 准备跳转到断点页面，页码=', page_no, ', type=', typeof(page_no));
+                console.log('Info(main): 准备跳转到断点页面，页码=', page_no);
                 await gotoPage(document, page_no); // TODO: ????
-                list_info = getNoticeListInfo(window.document);
+                await sleep(5000);
+                list_info = getNoticeListInfo(document);
                 status = updateStatusTotal(type_id, list_info.total);
             }
         }
 
         do {
-            console.log('Info(main): ', reprStatus(type_id));
-            console.log('Info(main): page_now=', list_info.current_page, ', records_in_page=', list_info.records_in_page, '。 爬取 && 发送数据。。。');
-            await getNoticeList(document, settings.spider, type_id)
-                .then( // 获取包含content的公告列表数组
-                notices => {
-                    for (let x of notices) {
-                        postOneNotice(x, settings.post_base_url).then( // 通过XHR发送爬取结果数据
-                            //status => console.log('Info(main): post notice, nid=', x.nid, ', status=',status),
-                            //error => console.log('Error(main): post notice failed! msg=', error)
-                        );
-                    }
-                })
-                .catch(
-                error => {
-                    console.log('Error(main): read content error, abort for retry again!');
-                    throw 'DOM error'; // TODO : 方法有效，需要catch处理
-                })
+            // console.log('Info(main): ', reprStatus(type_id));
+            console.log('Info(main): 正在处理的页面序号=', list_info.current_page, ', 当前页面记录数量=', list_info.records_in_page, '。 爬取 && 发送数据。。。');
+            // 获取包含content的公告列表数组
+            try {
+                const notices = await getNoticeList(document, settings.spider, type_id);
+                for (let x of notices) postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
+            } catch(error) {
+                throw(error); // 经常出现DOM不完整的错误不好处理，直接退出下次再试
+            }
 
-            status = updateStatusStep(type_id, list_info); // 完成记录读取以后，需要重置滑动窗口信息
+            // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
+            status = updateStatusStep(type_id, list_info);
             const page_no = jumpPage(status, list_info);
-            console.log('Debug(main): 即将跳转到新页面，page_no=', page_no)
+            console.log('Info(main): 即将跳转到新页面，direction=', status.direction, ', page_no=',page_no);
             if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
             } else if (page_no == list_info.current_page) {
-                console.log('Error(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
+                console.log('Warning(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
             }
+            // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
             gotoPage(document, page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
             await sleep(5000);
-            // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
-            list_info = getNoticeListInfo(window.document);
+            list_info = getNoticeListInfo(document);
             status = updateStatusTotal(type_id, list_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
             times--;
         } while(times > 0);
@@ -146,8 +134,8 @@
                 url:        base_url, // TODO：base_url + notice.nid,
                 data:       JSON.stringify(notice),
                 onload:     function (response){
-                    if (response.status == 200) resolve(0); // 插入成功
-                    else if (response.status == 405) resolve(-1); // 重复记录，约定http返回码=405
+                    if (response.status == 200) resolve('ok'); // 插入成功
+                    else if (response.status == 405) resolve('duplicated'); // 重复记录，约定http返回码=405
                     else reject(response); // 未知应用错误
                 },
                 onerror: function(error){ // 网络错误
@@ -179,10 +167,7 @@
 
             (async () => {
                 const ctw = window.open('', ''); // 打开一个临时窗口，用于提取内容文本，循环使用以节约资源
-                if (ctw == null) { // 新开窗口可能被拦截
-                    console.log('Error(getNoticeList): open new winodw failed, maybe blocked by chrome setting!');
-                    return null;
-                }
+                if (ctw == null) reject('新开window失败，可能是被浏览器拦截');
                 for (let x of notices) {
                     const url = settings.content_base_url + x.nid;
                     await getNoticeContent(ctw, url).then(
@@ -190,11 +175,8 @@
                             Object.assign(x, {notice_url: url});
                             Object.assign(x, {notice_content : content}); // 追加公告内容，后续增加附件下载功能
                             console.log('Info(getNoticeList): nid=', x.nid, ', title=', x.title.substr(0,30), ',length=', x.notice_content.length);
-                        }, // TODO: error handle?
-                        error => {
-                            console.log('Error(getNoticeList): nid=', x.nid, ', title=', x.title.substr(0,30), 'msg=', error);
-                            reject('retry');
-                        }
+                        },
+                        error => reject(error)
                     );
                 };
                 ctw.close();
@@ -207,19 +189,21 @@
     function getNoticeContent(page, url) {
         return new Promise((resolve,reject)=> {
             (async function (){
-                const selector_id = settings.selector.notice_content;
-
-                page.location.assign(url); // 打开内容网页
-                //console.log('Info(getContent): Open window with url=', url);
-                await waitForSelector(page, selector_id).then( //异步等待指定内容出现
-                    doc => {
+                try {
+                    const selector_id = settings.selector.notice_content;
+                    page.location.assign(url); // 打开内容网页
+                    //console.log('Info(getContent): Open window with url=', url);
+                    for (let retry=3; retry > 0; retry--) {
+                        const doc = await waitForSelector(page, selector_id);
                         const str = doc.body.innerText.trim();
-                        if (str.length <= 103) reject('DOM of notice content incomplete');
-                        resolve(str);
-                    },
-                    //doc => resolve(doc.body.outerHTML), // TODO: html or text
-                    error => reject(error)
-                );
+                        if (str.length <= 103) {
+                            console.log('Info(getNoticeContent): DOM内容不完整，再试一次..., url=' + url);
+                            page.location.reload();
+                            await sleep(1000);
+                        } else resolve(str);
+                    }
+                    reject('DOM of content incompelete, url=' + url);
+                } catch(error) { reject(error); }
             })(); // 定义异步函数并立即执行
         });
     }
