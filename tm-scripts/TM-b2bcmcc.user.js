@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TM-b2bcmcc
 // @namespace    www.caogo.cn
-// @version      0.98a
+// @version      0.98c
 // @description  scrapy notice info from DOM
 // @author       sj0225@icloud.com
 // @match        https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=*
@@ -22,8 +22,9 @@
         //RESET_MODE: true, // 默认是断点恢复模式
         NUMBER_OF_PAGES_READ_PER_STARTUP: 25, // 每次运行读取的页面数量
         SECONDS_BEFORE_LAST_RUNTIME: 60*0, // 上次运行的间隔时间，以防止插件重复运行
-        spider: 'TM',
-        type_id_groups: ['1','2','3','7','8','16'],
+        SPIDER: 'TM',
+        TYPE_ID_GROUPS: ['1','2','3','7','8','16'],
+        PAGE_SIZE: 20,
         selector: {
             page_size: '[name="page.perPageSize"]', // 页面尺寸
             // 还有一个方法是：document.querySelector('a.current').innerText
@@ -55,72 +56,71 @@
     // Main入口
     (async function(){
         //debugger;
-        console.log('Info(main): start main at ', new Date().toString);
-        showAllStatus();
+        console.log('Info(main): start main at ', new Date().toISOString);
+        //showAllStatus();
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
-        if (settings.type_id_groups.indexOf(type_id) < 0) throw('未知的type_id');
-        if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) throw('启动等待间隔时间未到');
+        if (settings.type_id_groups.indexOf(type_id) < 0) throw new Error('未知的type_id');
+        if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) throw new Error('启动等待间隔时间未到');
 
-        const reset_mode = settings.RESET_MODE ? settings.RESET_MODE : false;
         let times = settings.NUMBER_OF_PAGES_READ_PER_STARTUP ? settings.NUMBER_OF_PAGES_READ_PER_STARTUP : 500;
 
         await waitForSelector(window, settings.selector.current_page); // 异步等待当前页面完全加载
-        let list_info = getNoticeListInfo(window.document);
+        let page_info = getNoticeListInfo(window.document);
         let status = getStatus(type_id);
+        if (page_info.page_size != settings.PAGE_SIZE) throw new Error('page_size != 20');
 
-        if (reset_mode) { // 全新模式
+        if (settings.RESET_MODE) { // 全新模式
             console.log('Info(main): 本次程序运行在全新模式，清理所有状态，并默认从第1页开始, 读取页面次数=', times);
             clearAllStatus();
-            status = setStatus(type_id, list_info.total, list_info.total, list_info.total);
+            status = setStatus(type_id, page_info.total, page_info.total, page_info.total);
         } else { // 断点模式
             console.log('Info(main): 本次程序运行在断点模式，读取页面次数=', times);
             if (status == null) {
                 console.log('Info:(main) 断点日志不存在，自动创建之...');
-                status = setStatus(type_id, list_info.total, list_info.total, list_info.total);
-            } else if (status.total < list_info.total) { // 页面有更新
-                status = updateStatusTotal(type_id, list_info.total);
+                status = setStatus(type_id, page_info.total, page_info.total, page_info.total);
+            } else if (status.total < page_info.total) { // 页面有更新
+                status = updateStatusTotal(type_id, page_info.total);
             }
-            const page_no = jumpPage(status, list_info);
+            const page_no = jumpPage(status, page_info);
             if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
-            } else if (page_no != list_info.current_page) { // 如果只新增几条记录，可能还在第一页
+            } else if (page_no != page_info.current_page) { // 如果只新增几条记录，可能还在第一页
                 console.log('Info(main): 准备跳转到断点页面，页码=', page_no);
                 await gotoPage(document, page_no); // TODO: ????
                 await sleep(5000);
-                list_info = getNoticeListInfo(document);
-                status = updateStatusTotal(type_id, list_info.total);
+                page_info = getNoticeListInfo(document);
+                status = updateStatusTotal(type_id, page_info.total);
             }
         }
 
-        do {
+        for (; times > 0; times--) {
             // console.log('Info(main): ', reprStatus(type_id));
             console.log('Info(main): 正在处理的页面序号=', list_info.current_page, ', 当前页面记录数量=', list_info.records_in_page, '。 爬取 && 发送数据。。。');
             // 获取包含content的公告列表数组
             try {
-                const notices = await getNoticeList(document, settings.spider, type_id);
+                const notices = await getNoticeList(document, settings.SPIDER, type_id);
                 for (let x of notices) postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
             } catch(error) {
                 throw('Alex catched:' + error); // 经常出现DOM不完整的错误不好处理，直接退出下次再试
             }
 
             // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
-            status = updateStatusStep(type_id, list_info);
-            const page_no = jumpPage(status, list_info);
+            status = updateStatusStep(type_id, page_info);
+            const page_no = jumpPage(status, page_info);
             console.log('Info(main): 即将跳转到新页面，direction=', status.direction, ', page_no=',page_no);
             if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
-            } else if (page_no == list_info.current_page) {
+            } else if (page_no == page_info.current_page) {
                 console.log('Warning(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
             }
             // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
             gotoPage(document, page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
             await sleep(5000);
             list_info = getNoticeListInfo(document);
-            status = updateStatusTotal(type_id, list_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
-            times--;
-        } while(times > 0);
+            status = updateStatusTotal(type_id, page_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
+        }
         console.log('Info(main): 已经达到累计读取页面数量限制，本次运行即将结束！');
         return 1;
     }
@@ -212,7 +212,7 @@
     }
 
     // Func: 跳转到指定页面
-    async function gotoPage(doc, page_no){
+    async function gotoPage(page_no){
         if (typeof(page_no) != 'number' || page_no <= 0 ) {
             console.log('Error(gotoPage): 输入参数错误， page_no=' + String(page_no));
             return -1;
@@ -238,8 +238,8 @@
                 total: Number(str.split('/')[0].slice(1,-3).replace(',','')),
                 current_page: Number(doc.querySelector(settings.selector.current_page).value), // 当前页面序号
                 page_size: Number(doc.querySelector(settings.selector.page_size).value),
-                previous_page_button: doc.querySelector(settings.selector.previous_page_button), // ‘上一页’按钮
-                next_page_button: doc.querySelector(settings.selector.next_page_button), // ‘下一页’按钮
+                //previous_page_button: doc.querySelector(settings.selector.previous_page_button), // ‘上一页’按钮
+                //next_page_button: doc.querySelector(settings.selector.next_page_button), // ‘下一页’按钮
                 records_in_page: doc.querySelectorAll(settings.selector.notice_list).length - 2, // 带2个表头行
             }
         }
@@ -308,7 +308,8 @@
             return null;
         }
         return 'type_id=' + id + ': total=' + s.total.toString() + ', start=' + s.start.toString()
-            +', end=' + s.end.toString() + ', direction=' + s.direction +', timestamp=' + new Date(s.timestamp).toISOString();
+            +', end=' + s.end.toString() + ', direction=' + s.direction 
+            + ', timestamp=' + new Date(s.timestamp).toISOString();
     }
 
     // Func：当发现记录总数有新增时，更新滑动窗口的记录总数信息
@@ -325,13 +326,13 @@
     }
 
     // Func：在读取数据列表成功后，更新滑动窗口的步长信息
-    function updateStatusStep(id, list_info) {
+    function updateStatusStep(id, page_info) {
         let now = getStatus(id);
         if (now.direction == 'backward') { // 头部还没读完
-            const start1 = list_info.total - ((list_info.current_page - 1) * list_info.page_size);
+            const start1 = page_info.total - ((page_info.current_page - 1) * page_info.page_size);
             setStatus(id, now.total, start1, now.end); // 刷新status并持久化
         } else if (now.direction == 'forward') { // 尾部还没读完
-            const end1 = list_info.total - ((list_info.current_page - 1) * list_info.page_size) - list_info.records_in_page;
+            const end1 = page_info.total - ((page_info.current_page - 1) * page_info.page_size) - page_info.records_in_page;
             setStatus(id, now.total, now.start, end1); // 刷新status并持久化
         }
         return getStatus(id);
