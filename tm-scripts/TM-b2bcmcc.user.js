@@ -62,7 +62,7 @@
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
         let status, page_info;
 
-        if (settings.type_id_groups.indexOf(type_id) < 0) throw new Error('未知的type_id');
+        if (settings.TYPE_ID_GROUPS.indexOf(type_id) < 0) throw new Error('未知的type_id');
         if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) throw new Error('启动等待间隔时间未到');
 
         await waitForSelector(window, settings.selector.current_page); // 异步等待当前页面完全加载
@@ -97,7 +97,7 @@
 
         for (let i = times; i > 0; i--) {
             // console.log('Info(main): ', reprStatus(type_id));
-            console.log('Info(main): 正在处理的页面序号=', list_info.current_page, ', 当前页面记录数量=', list_info.records_in_page, '。 爬取 && 发送数据。。。');
+            console.log('Info(main): 正在处理的页面序号=', page_info.current_page, ', 当前页面记录数量=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
             // 获取包含content的公告列表数组
             try {
                 const notices = await getNoticeList(document, settings.SPIDER, type_id);
@@ -117,9 +117,9 @@
                 console.log('Warning(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
             }
             // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
-            gotoPage(document, page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
+            gotoPage(page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
             await sleep(5000);
-            list_info = getNoticeListInfo(document);
+            page_info = getNoticeListInfo(document);
             status = updateStatusTotal(type_id, page_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
         }
         console.log('Info(main): 已经达到累计读取页面数量限制，本次运行即将结束！');
@@ -257,7 +257,7 @@
     function lastRuntime() {
         let last = 0;
         for (let x of GM_listValues()) {
-            if (settings.type_id_groups.indexOf(x) >= 0) {
+            if (settings.TYPE_ID_GROUPS.indexOf(x) >= 0) {
                 const ts = GM_getValue(x).timestamp;
                 if ( ts > last) last = ts;
             }
@@ -312,7 +312,7 @@
             return null;
         }
         return 'type_id=' + id + ': total=' + s.total.toString() + ', start=' + s.start.toString()
-            +', end=' + s.end.toString() + ', direction=' + s.direction 
+            +', end=' + s.end.toString() + ', direction=' + s.direction
             + ', timestamp=' + new Date(s.timestamp).toISOString();
     }
 
