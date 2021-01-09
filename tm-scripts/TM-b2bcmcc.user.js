@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TM-b2bcmcc
 // @namespace    www.caogo.cn
-// @version      0.98c
+// @version      1.0
 // @description  scrapy notice info from DOM
 // @author       sj0225@icloud.com
 // @match        https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=*
@@ -46,7 +46,6 @@
     // Main入口
     (async function(){
         //debugger;
-        showAllStatus();
         console.log('Info(main): start main at ', new Date().toString());
         const times = settings.NUMBER_OF_PAGES_READ_PER_STARTUP ? settings.NUMBER_OF_PAGES_READ_PER_STARTUP : 500;
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
@@ -66,6 +65,7 @@
             status = setStatus(type_id, page_info.total, page_info.total, page_info.total);
         } else { // 断点模式
             console.log('Info(main): 本次程序运行在断点模式，读取页面次数=', times);
+            showAllStatus();
             if (status == null) {
                 console.log('Info:(main) 断点日志不存在，自动创建之...');
                 status = setStatus(type_id, page_info.total, page_info.total, page_info.total);
@@ -89,7 +89,7 @@
             console.log('Info(main): 正在处理的页面序号=', page_info.current_page, ', 当前页面记录数量=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
             // 获取包含content的公告列表数组
             try {
-                const notices = await getNoticeList(document, settings.SPIDER, type_id);
+                const notices = await getNoticeList(settings.SPIDER, type_id);
                 for (let x of notices) await postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
             } catch(error) {
                 throw('Alex catched:' + error); // 经常出现DOM不完整的错误不好处理，直接退出下次再试
@@ -140,7 +140,7 @@
     }
 
     // Func: 读取公告列表数据，并追加详情数据项
-    function getNoticeList(doc, spider, type_id) {
+    function getNoticeList(spider, type_id) {
         return new Promise((resolve, reject)=>{
             let notices = [];
             let line = document.querySelectorAll(settings.selector.notice_list)[2]; // 表头2行，数据从第三行开始
