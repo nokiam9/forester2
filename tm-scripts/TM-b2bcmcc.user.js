@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TM-b2bcmcc
 // @namespace    www.caogo.cn
-// @version      1.0
+// @version      1.1
 // @description  scrapy notice info from DOM
 // @author       sj0225@icloud.com
 // @match        https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=*
@@ -47,6 +47,7 @@
     (async function(){
         //debugger;
         console.log('Info(main): start main at ', new Date().toString());
+
         const times = settings.NUMBER_OF_PAGES_READ_PER_STARTUP ? settings.NUMBER_OF_PAGES_READ_PER_STARTUP : 500;
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
         let status, page_info;
@@ -58,6 +59,7 @@
         page_info = getNoticeListInfo(window.document);
         if (page_info.page_size != settings.PAGE_SIZE) throw new Error('page_size != 20');
         status = getStatus(type_id);
+        showStatusBar(status, page_info);
 
         if (settings.RESET_MODE) { // 全新模式
             console.log('Info(main): 本次程序运行在全新模式，清理所有状态，并默认从第1页开始, 读取页面次数=', times);
@@ -81,19 +83,17 @@
                 await gotoPage(page_no); // TODO: ????
                 page_info = getNoticeListInfo(document);
                 status = updateStatusTotal(type_id, page_info.total);
+                showStatusBar(status, page_info);
             }
         }
 
         for (let i = times; i > 0; i--) {
             // console.log('Info(main): ', reprStatus(type_id));
             console.log('Info(main): 正在处理的页面序号=', page_info.current_page, ', 当前页面记录数量=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
+
             // 获取包含content的公告列表数组
-            try {
-                const notices = await getNoticeList(settings.SPIDER, type_id);
-                for (let x of notices) await postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
-            } catch(error) {
-                throw('Alex catched:' + error); // 经常出现DOM不完整的错误不好处理，直接退出下次再试
-            }
+            const notices = await getNoticeList(settings.SPIDER, type_id);
+            for (let x of notices) await postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
 
             // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
             status = updateStatusStep(type_id, page_info);
@@ -111,11 +111,55 @@
             await gotoPage(page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
             page_info = getNoticeListInfo(document);
             status = updateStatusTotal(type_id, page_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
+            showStatusBar(status, page_info);
         }
         console.log('Info(main): 已经达到累计读取页面数量限制，本次运行即将结束！');
         return 1;
     }
-    )();
+    )().catch(console.error) //在main()的尾部统一处理异常
+
+    // Func: 在DOM顶端显示控制信息
+    function showStatusBar(status, page_info) {
+        let div = document.getElementById("TM");
+        if (div == null) { // div不存在，则创建之
+            div = document.createElement("div");
+            div.id = 'TM';
+            let body = document.getElementsByTagName('body')[0];
+            body.insertBefore(div, body.children[0]);
+        } else { // div已经存在，则删除所有成员
+            for (let i = div.childNodes.length - 1; i >= 0; i--) div.removeChild(div.childNodes[i]);
+        }
+
+        let tr = document.createElement("tr");
+        tr.width = '100%';
+        div.appendChild(tr);
+        for(let name in status){
+            let td = document.createElement("td");
+            td.id = name;
+            setStyle(td);
+            const str = name + ':' + status[name].toString();
+            td.appendChild(document.createTextNode(str));
+            tr.appendChild(td);
+        }
+
+        tr = document.createElement("tr");
+        tr.width = '100%';
+        div.appendChild(tr);
+        for(let name in page_info){
+            let td = document.createElement("td");
+            td.id = name;
+            setStyle(td);
+            const str = name + ':' + page_info[name].toString();
+            td.appendChild(document.createTextNode(str));
+            tr.appendChild(td);
+        }
+
+        function setStyle(node) {
+            node.align = "center";
+            node.style = 'text-align: center; font-size:20px; font-weight:bold; color:White; background-color:Red;';
+            node.width = '25%';
+        }
+    }
 
     // Func: 向XHR发送一条公告数据，返回值：0-成功，-1重复记录
     function postOneNotice(notice, base_url){
@@ -161,6 +205,7 @@
 
             (async () => {
                 const ctw = window.open('', ''); // 打开一个临时窗口，用于提取内容文本，循环使用以节约资源
+                window.focus();
                 if (ctw == null) reject('新开window失败，可能是被浏览器拦截');
                 for (let x of notices) {
                     const url = settings.content_base_url + x.nid;
@@ -189,6 +234,7 @@
 
                 try {
                     page.location.assign(url); // 打开内容网页
+                    page.opener.focus();
                     //console.log('Info(getContent): Open window with url=', url);
                     for (let i = retry_times; i > 0; i--) {
                         const doc = await waitForSelector(page, selector_id);
