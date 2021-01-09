@@ -43,21 +43,11 @@
         //post_base_url: 'http://127.0.0.1/api/notices/',
     };
 
-    function nextPage(status, page_info){
-        if (status.direction == 'stop') return 0;
-        else if (status.direction == 'forward') {
-            return Math.floor((page_info.total - status.end) / page_info.page_size) + 1;
-        }
-        else {
-            return Math.floor((page_info.total - status.start - 1) / page_info.page_size) + 1; // backward
-        }
-    }
-
     // Main入口
     (async function(){
         //debugger;
-        //showAllStatus();
-        console.log('Info(main): start main at ', new Date().toISOString);
+        showAllStatus();
+        console.log('Info(main): start main at ', new Date().toString());
         const times = settings.NUMBER_OF_PAGES_READ_PER_STARTUP ? settings.NUMBER_OF_PAGES_READ_PER_STARTUP : 500;
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
         let status, page_info;
@@ -89,7 +79,6 @@
             } else if (page_no != page_info.current_page) { // 如果只新增几条记录，可能还在第一页
                 console.log('Info(main): 准备跳转到断点页面，页码=', page_no);
                 await gotoPage(page_no); // TODO: ????
-                await sleep(5000);
                 page_info = getNoticeListInfo(document);
                 status = updateStatusTotal(type_id, page_info.total);
             }
@@ -108,17 +97,18 @@
 
             // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
             status = updateStatusStep(type_id, page_info);
+            if (status == null) throw new Error('updateStatusStep failed');
+
             const page_no = nextPage(status, page_info);
             console.log('Info(main): 即将跳转到新页面，direction=', status.direction, ', page_no=',page_no);
             if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
             } else if (page_no == page_info.current_page) {
-                console.log('Warning(main): 主循环控制可能错误，jumpPage也许会陷入当前页面的死循环');
+                console.log('Warning(main): 循环读取当前页面，可能控制逻辑错误导致的死循环，但也可能是突发少量更新记录');
             }
             // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
-            gotoPage(page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
-            await sleep(5000);
+            await gotoPage(page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
             page_info = getNoticeListInfo(document);
             status = updateStatusTotal(type_id, page_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
         }
@@ -215,6 +205,17 @@
         });
     }
 
+    // Func: 计算下一个将要跳转的页面序号
+    function nextPage(status, page_info){
+        if (status.direction == 'stop') return 0;
+        else if (status.direction == 'forward') {
+            return Math.floor((page_info.total - status.end) / page_info.page_size) + 1;
+        }
+        else {
+            return Math.floor((page_info.total - status.start - 1) / page_info.page_size) + 1; // backward
+        }
+    }
+
     // Func: 跳转到指定页面
     async function gotoPage(page_no) {
         if (typeof(page_no) != 'number' || page_no <= 0 ) {
@@ -281,6 +282,8 @@
 
     // Func：设置滑动窗口信息，并给出下一步的direction
     function setStatus(id, total, start, end) {
+        let direction;
+
         if (start < 0 || start > total) {
             console.log('Error: value of start error! start=', start);
             return null;
@@ -290,9 +293,9 @@
             return null;
         }
         else {
-            let direction = 'forward'; // 默认值
-            if (total > start) direction = 'backward';
-            else if (end == 0) direction = 'stop';
+            if (total > start) direction = 'backward'; // 优先读取头部
+            else if (end > 0) direction = 'forward';
+            else direction = 'stop'; // 头尾都为空，即将结束退出
             GM_setValue(id, {total:total, start:start, end:end, direction:direction, timestamp: new Date().getTime()});
             console.log('Debug(setStatus): ', reprStatus(id));
             return getStatus(id);
@@ -331,13 +334,21 @@
 
     // Func：在读取数据列表成功后，更新滑动窗口的步长信息
     function updateStatusStep(id, page_info) {
-        let now = getStatus(id);
-        if (now.direction == 'backward') { // 头部还没读完
-            const start1 = page_info.total - ((page_info.current_page - 1) * page_info.page_size);
-            setStatus(id, now.total, start1, now.end); // 刷新status并持久化
-        } else if (now.direction == 'forward') { // 尾部还没读完
-            const end1 = page_info.total - ((page_info.current_page - 1) * page_info.page_size) - page_info.records_in_page;
-            setStatus(id, now.total, now.start, end1); // 刷新status并持久化
+        const status = getStatus(id);
+        const top = page_info.total - ((page_info.current_page - 1) * page_info.page_size);
+        const bottom = top - page_info.records_in_page;
+
+        // 本次读取头部，并确保start在正确区间内的条件下，刷新滑动窗口
+        if (status.direction == 'backward') {
+            if ((status.start + 1) >= bottom && (status.start + 1) <= top) {
+                setStatus(id, status.total, top, status.end);
+            } else return null;
+        }
+        // 本次读取尾部，并确保end在正确区间内的条件下，刷新滑动窗口
+        if (status.direction == 'forward') {
+            if ((status.end - 1) >= bottom && (status.end - 1) <= top) {
+                setStatus(id, status.total, status.start, bottom);
+            } else return null;
         }
         return getStatus(id);
     }
