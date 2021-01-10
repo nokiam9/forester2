@@ -80,11 +80,13 @@
         for (let i = times; i > 0; i--) {
             // 重要！！！此处判断页面是否有更新
             if (status.total < page_info.total) status = updateStatusTotal(type_id, page_info.total);
-            if (status.direction == 'stop') {
+
+            const page_no = nextPage(status, page_info);
+            if (page_no == 0) {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
             }
-            if (nextPage(status, page_info) == page_info.current_page) { // 如果只新增几条记录，可能还在第一页
+            if (page_no == page_info.current_page) { // 如果只新增几条记录，可能还在第一页
                 // 获取包含content的公告列表数组
                 console.log('Info(main): 正在处理的页面序号=', page_info.current_page, ', 当前页面记录数量=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
                 const notices = await getNoticeList(settings.SPIDER, type_id);
@@ -95,8 +97,8 @@
                 if (status == null) throw new Error('updateStatusStep failed');
             }
             // 准备处理下一个页面
-            console.log('Info(main): 准备跳转到下一个页面，页码=', nextPage(status, page_info));
-            await gotoPage(nextPage(status, page_info));
+            console.log('Info(main): 准备跳转到下一个页面，页码=', page_no);
+            await gotoPage(page_no);
             page_info = getNoticeListInfo(document);
             showStatusBar(status, page_info);
         }
