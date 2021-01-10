@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TM-b2bcmcc
 // @namespace    www.caogo.cn
-// @version      1.1
+// @version      1.2
 // @description  scrapy notice info from DOM
 // @author       sj0225@icloud.com
 // @match        https://b2b.10086.cn/b2b/main/listVendorNotice.html?noticeType=*
@@ -44,73 +44,60 @@
     };
 
     // Main入口
-    (async function(){
+    (async function main() {
         //debugger;
         console.log('Info(main): start main at ', new Date().toString());
+        showAllStatus();
 
         const times = settings.NUMBER_OF_PAGES_READ_PER_STARTUP ? settings.NUMBER_OF_PAGES_READ_PER_STARTUP : 500;
         const type_id = window.location.search.split('=')[1]; // 取出url的参数值 [1,2,3,7,8,16]
-        let status, page_info;
+        let page_info, status;
 
         if (settings.TYPE_ID_GROUPS.indexOf(type_id) < 0) throw new Error('未知的type_id');
         if ((new Date().getTime() - settings.SECONDS_BEFORE_LAST_RUNTIME*1000) < lastRuntime()) throw new Error('启动等待间隔时间未到');
 
-        await waitForSelector(window, settings.selector.current_page); // 异步等待当前页面完全加载
+        // 异步等待当前页面完全加载
+        await waitForSelector(window, settings.selector.current_page);
         page_info = getNoticeListInfo(window.document);
         if (page_info.page_size != settings.PAGE_SIZE) throw new Error('page_size != 20');
-        status = getStatus(type_id);
-        showStatusBar(status, page_info);
 
+        // status初始化
         if (settings.RESET_MODE) { // 全新模式
             console.log('Info(main): 本次程序运行在全新模式，清理所有状态，并默认从第1页开始, 读取页面次数=', times);
             clearAllStatus();
             status = setStatus(type_id, page_info.total, page_info.total, page_info.total);
         } else { // 断点模式
             console.log('Info(main): 本次程序运行在断点模式，读取页面次数=', times);
-            showAllStatus();
+            status = getStatus(type_id);
             if (status == null) {
                 console.log('Info:(main) 断点日志不存在，自动创建之...');
                 status = setStatus(type_id, page_info.total, page_info.total, page_info.total);
-            } else if (status.total < page_info.total) { // 页面有更新
-                status = updateStatusTotal(type_id, page_info.total);
-            }
-            const page_no = nextPage(status, page_info);
-            if (page_no == 0) {
-                console.log('Info(main): 没有新数据，本次运行即将结束');
-                return 0;
-            } else if (page_no != page_info.current_page) { // 如果只新增几条记录，可能还在第一页
-                console.log('Info(main): 准备跳转到断点页面，页码=', page_no);
-                await gotoPage(page_no); // TODO: ????
-                page_info = getNoticeListInfo(document);
-                status = updateStatusTotal(type_id, page_info.total);
-                showStatusBar(status, page_info);
             }
         }
+        showStatusBar(status, page_info); // 为当前DOM增加控制信息组件
 
+        // 主循环控制逻辑
         for (let i = times; i > 0; i--) {
-            // console.log('Info(main): ', reprStatus(type_id));
-            console.log('Info(main): 正在处理的页面序号=', page_info.current_page, ', 当前页面记录数量=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
-
-            // 获取包含content的公告列表数组
-            const notices = await getNoticeList(settings.SPIDER, type_id);
-            for (let x of notices) await postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
-
-            // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
-            status = updateStatusStep(type_id, page_info);
-            if (status == null) throw new Error('updateStatusStep failed');
-
-            const page_no = nextPage(status, page_info);
-            console.log('Info(main): 即将跳转到新页面，direction=', status.direction, ', page_no=',page_no);
-            if (page_no == 0) {
+            // 重要！！！此处判断页面是否有更新
+            if (status.total < page_info.total) status = updateStatusTotal(type_id, page_info.total);
+            if (status.direction == 'stop') {
                 console.log('Info(main): 没有新数据，本次运行即将结束');
                 return 0;
-            } else if (page_no == page_info.current_page) {
-                console.log('Warning(main): 循环读取当前页面，可能控制逻辑错误导致的死循环，但也可能是突发少量更新记录');
             }
-            // 可能走到23页时突然发现新纪录，此时不能直接点击下一页，只能跳转到start所在页面，然后继续采用跳转方式往回走
-            await gotoPage(page_no); // gotoPage自带页面号码检查功能，此时DOM已经加载成功
+            if (nextPage(status, page_info) == page_info.current_page) { // 如果只新增几条记录，可能还在第一页
+                // 获取包含content的公告列表数组
+                console.log('Info(main): 正在处理的页面序号=', page_info.current_page, ', 当前页面记录数量=', page_info.records_in_page, '。 爬取 && 发送数据。。。');
+                const notices = await getNoticeList(settings.SPIDER, type_id);
+                for (let x of notices) await postOneNotice(x, settings.post_base_url); // 通过XHR发送数据
+
+                // 完成当前页面数据处理后，需要重置滑动窗口信息，并判断下一步的处理方式
+                status = updateStatusStep(type_id, page_info);
+                if (status == null) throw new Error('updateStatusStep failed');
+            }
+            // 准备处理下一个页面
+            console.log('Info(main): 准备跳转到下一个页面，页码=', nextPage(status, page_info));
+            await gotoPage(nextPage(status, page_info));
             page_info = getNoticeListInfo(document);
-            status = updateStatusTotal(type_id, page_info.total); //TODO: 这里还可能有问题，如果又更新了呢？？？
             showStatusBar(status, page_info);
         }
         console.log('Info(main): 已经达到累计读取页面数量限制，本次运行即将结束！');
